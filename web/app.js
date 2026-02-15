@@ -51,10 +51,12 @@
 
   // Kokoro TTS
   let kokoroTTS = null;
-  let kokoroLoading = false;
+  let kokoroLoadingPromise = null; // shared promise so multiple callers wait
   let kokoroAudioCtx = null;
   let kokoroCurrentSource = null;
   let useBrowserTTS = false; // true if Kokoro completely fails
+
+  const KOKORO_TIMEOUT_MS = 30000; // 30s timeout for model download on mobile
 
   const HISTORY_KEY = "readAloudHistory";
   const MAX_HISTORY = 10;
@@ -352,59 +354,82 @@
   });
 
   // ========== Kokoro TTS ==========
-  async function initKokoro() {
-    if (kokoroTTS) return true;
-    if (useBrowserTTS) return false;
-    if (kokoroLoading) return false;
 
-    kokoroLoading = true;
+  function activateBrowserTTSFallback(message) {
+    useBrowserTTS = true;
+    voiceLoadingText.textContent = message;
+    populateBrowserVoices();
+    setTimeout(() => voiceLoading.classList.add("hidden"), 2500);
+  }
+
+  function doInitKokoro() {
     voiceLoading.classList.remove("hidden");
     voiceLoadingText.textContent = "Loading AI voice model (first time only)…";
 
     const MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
-    try {
+    // Race the model download against a timeout
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), KOKORO_TIMEOUT_MS)
+    );
+
+    const load = (async () => {
       const { KokoroTTS } = await import(
         "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm"
       );
-
       voiceLoadingText.textContent = "Downloading voice model…";
 
       // Try WebGPU first (best quality), fall back to WASM (universal)
       try {
-        kokoroTTS = await KokoroTTS.from_pretrained(MODEL, {
+        return await KokoroTTS.from_pretrained(MODEL, {
           dtype: "q8",
           device: "webgpu",
         });
       } catch {
         voiceLoadingText.textContent = "WebGPU not available, using WASM…";
-        kokoroTTS = await KokoroTTS.from_pretrained(MODEL, {
+        return await KokoroTTS.from_pretrained(MODEL, {
           dtype: "q8",
           device: "wasm",
         });
       }
+    })();
 
-      voiceLoading.classList.add("hidden");
-      kokoroLoading = false;
-      return true;
-    } catch (err) {
-      console.error("Kokoro TTS failed:", err);
-      kokoroLoading = false;
-
-      // Fall back to browser SpeechSynthesis
-      if (typeof speechSynthesis !== "undefined") {
-        useBrowserTTS = true;
-        voiceLoadingText.textContent =
-          "AI voice unavailable on this device. Using built-in voice.";
-        populateBrowserVoices();
-        setTimeout(() => voiceLoading.classList.add("hidden"), 2500);
+    return Promise.race([load, timeout]).then(
+      (tts) => {
+        kokoroTTS = tts;
+        voiceLoading.classList.add("hidden");
+        return true;
+      },
+      (err) => {
+        console.error("Kokoro TTS failed:", err);
+        const isTimeout = err.message === "timeout";
+        if (typeof speechSynthesis !== "undefined") {
+          activateBrowserTTSFallback(
+            isTimeout
+              ? "AI voice download timed out. Using built-in voice."
+              : "AI voice unavailable on this device. Using built-in voice."
+          );
+        } else {
+          voiceLoadingText.textContent =
+            "Could not load AI voice. Try a different browser.";
+        }
         return false;
       }
+    );
+  }
 
-      voiceLoadingText.textContent =
-        "Could not load AI voice. Try a different browser.";
-      return false;
+  /** Returns a promise that resolves to true (Kokoro ready) or false. */
+  function initKokoro() {
+    if (kokoroTTS) return Promise.resolve(true);
+    if (useBrowserTTS) return Promise.resolve(false);
+
+    // If already loading, return the same promise so callers wait together
+    if (!kokoroLoadingPromise) {
+      kokoroLoadingPromise = doInitKokoro().finally(() => {
+        kokoroLoadingPromise = null;
+      });
     }
+    return kokoroLoadingPromise;
   }
 
   // Browser SpeechSynthesis fallback voices
@@ -452,6 +477,15 @@
   }
 
   async function playSpeech() {
+    // IMPORTANT: Create/resume AudioContext immediately within the user
+    // gesture (tap/click). Mobile browsers block audio otherwise.
+    if (!kokoroAudioCtx) {
+      kokoroAudioCtx = new AudioContext({ sampleRate: 24000 });
+    }
+    if (kokoroAudioCtx.state === "suspended") {
+      await kokoroAudioCtx.resume();
+    }
+
     await initKokoro();
 
     if (useBrowserTTS) {
@@ -460,10 +494,6 @@
     }
 
     if (!kokoroTTS) return;
-
-    if (!kokoroAudioCtx) {
-      kokoroAudioCtx = new AudioContext({ sampleRate: 24000 });
-    }
 
     const voiceId = voiceSelect.value || "af_heart";
     const rate = parseFloat(speedSlider.value);
