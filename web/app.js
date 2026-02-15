@@ -54,9 +54,13 @@
   let kokoroLoadingPromise = null; // shared promise so multiple callers wait
   let kokoroAudioCtx = null;
   let kokoroCurrentSource = null;
-  let useBrowserTTS = false; // true if Kokoro completely fails
+  let useBrowserTTS = false; // true if Kokoro completely fails or on mobile
 
-  const KOKORO_TIMEOUT_MS = 30000; // 30s timeout for model download on mobile
+  const KOKORO_TIMEOUT_MS = 30000; // 30s timeout for model download
+
+  // Detect mobile: Kokoro WASM produces gibberish on mobile ARM CPUs,
+  // so we use the phone's built-in voices instead (which are actually good).
+  const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
   const HISTORY_KEY = "readAloudHistory";
   const MAX_HISTORY = 10;
@@ -95,7 +99,15 @@
     const saved = localStorage.getItem("readAloudVoice");
     if (saved) voiceSelect.value = saved;
   }
-  populateVoices();
+  if (IS_MOBILE) {
+    // On mobile, show built-in phone voices immediately
+    useBrowserTTS = true;
+    if (typeof speechSynthesis !== "undefined") {
+      populateBrowserVoices();
+    }
+  } else {
+    populateVoices();
+  }
 
   voiceSelect.addEventListener("change", () => {
     localStorage.setItem("readAloudVoice", voiceSelect.value);
@@ -422,6 +434,15 @@
   function initKokoro() {
     if (kokoroTTS) return Promise.resolve(true);
     if (useBrowserTTS) return Promise.resolve(false);
+
+    // On mobile, skip Kokoro entirely — WASM produces garbled audio on
+    // ARM processors. Use the phone's built-in voices instead.
+    if (IS_MOBILE) {
+      if (typeof speechSynthesis !== "undefined") {
+        activateBrowserTTSFallback("Using your phone's built-in voice.");
+      }
+      return Promise.resolve(false);
+    }
 
     // If already loading, return the same promise so callers wait together
     if (!kokoroLoadingPromise) {
