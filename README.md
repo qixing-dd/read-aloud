@@ -6,7 +6,7 @@ Paste a URL, type text, or upload a file — and listen to it read aloud with a 
 
 Visit the web version — no download needed:
 
-**https://YOUR_USERNAME.github.io/read-aloud/**
+**https://qixing-dd.github.io/read-aloud/**
 
 Works on any device: iPhone, Android, Mac, Windows, Linux.
 
