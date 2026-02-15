@@ -1,0 +1,10 @@
+# Binary
+read-aloud
+read-aloud.exe
+
+# Build artifacts
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db

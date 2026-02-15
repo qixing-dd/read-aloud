@@ -1,0 +1,16 @@
+{
+  "name": "Read Aloud",
+  "short_name": "Read Aloud",
+  "description": "Listen to articles, text, and documents read aloud with a natural AI voice.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#e4ecf1",
+  "theme_color": "#42a5f5",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔊</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
