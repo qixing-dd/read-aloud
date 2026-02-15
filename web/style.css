@@ -475,32 +475,7 @@ body {
   max-width: 120px;
 }
 
-/* (engine switcher removed — Kokoro AI voice only) */
-
-/* Voice loading indicator */
-.voice-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-md);
-  margin-bottom: var(--space-md);
-  background: var(--info-bg);
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-  color: var(--info-text);
-}
-.voice-loading-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--accent-light);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+/* (Kokoro removed — using browser SpeechSynthesis) */
 
 /* ========== Mobile / Touch ========== */
 button, .icon-btn, .btn-extract, .btn-play-large, .history-card {

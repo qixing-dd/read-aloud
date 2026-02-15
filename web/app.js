@@ -23,8 +23,6 @@
   const btnBack = document.getElementById("btn-back");
   const playerTitle = document.getElementById("player-title");
   const playerSource = document.getElementById("player-source");
-  const voiceLoading = document.getElementById("voice-loading");
-  const voiceLoadingText = document.getElementById("voice-loading-text");
   const previewEl = document.getElementById("preview");
   const timeCurrent = document.getElementById("time-current");
   const timeTotal = document.getElementById("time-total");
@@ -44,38 +42,12 @@
   let currentSource = "";
   let currentItemId = null;
   let speaking = false;
-  let paused = false;
   let speechStartTime = 0;
   let speechTimer = null;
   let estimatedDuration = 0;
 
-  // Kokoro TTS
-  let kokoroTTS = null;
-  let kokoroLoadingPromise = null; // shared promise so multiple callers wait
-  let kokoroAudioCtx = null;
-  let kokoroCurrentSource = null;
-  let useBrowserTTS = false; // true if Kokoro completely fails or on mobile
-
-  const KOKORO_TIMEOUT_MS = 30000; // 30s timeout for model download
-
-  // Detect mobile: Kokoro WASM produces gibberish on mobile ARM CPUs,
-  // so we use the phone's built-in voices instead (which are actually good).
-  const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
   const HISTORY_KEY = "readAloudHistory";
   const MAX_HISTORY = 10;
-
-  // Kokoro voices
-  const KOKORO_VOICES = [
-    { id: "af_heart", name: "Heart", lang: "American Female" },
-    { id: "af_bella", name: "Bella", lang: "American Female" },
-    { id: "af_nicole", name: "Nicole", lang: "American Female" },
-    { id: "af_sky", name: "Sky", lang: "American Female" },
-    { id: "am_adam", name: "Adam", lang: "American Male" },
-    { id: "am_michael", name: "Michael", lang: "American Male" },
-    { id: "bf_emma", name: "Emma", lang: "British Female" },
-    { id: "bm_george", name: "George", lang: "British Male" },
-  ];
 
   // ========== Greeting ==========
   function updateGreeting() {
@@ -86,28 +58,28 @@
   }
   updateGreeting();
 
-  // ========== Voices ==========
+  // ========== Voices (Browser SpeechSynthesis) ==========
   function populateVoices() {
+    const voices = speechSynthesis.getVoices();
+    if (voices.length === 0) {
+      // Voices not loaded yet — wait for the event
+      speechSynthesis.addEventListener("voiceschanged", populateVoices, { once: true });
+      return;
+    }
     voiceSelect.innerHTML = "";
-    KOKORO_VOICES.forEach((v) => {
+    const english = voices.filter((v) => v.lang.startsWith("en"));
+    const list = english.length > 0 ? english : voices.slice(0, 10);
+    list.forEach((v) => {
       const opt = document.createElement("option");
-      opt.value = v.id;
-      opt.textContent = v.name + " (" + v.lang + ")";
+      opt.value = v.voiceURI;
+      opt.textContent = v.name;
       voiceSelect.appendChild(opt);
     });
     // Restore saved voice
     const saved = localStorage.getItem("readAloudVoice");
     if (saved) voiceSelect.value = saved;
   }
-  if (IS_MOBILE) {
-    // On mobile, show built-in phone voices immediately
-    useBrowserTTS = true;
-    if (typeof speechSynthesis !== "undefined") {
-      populateBrowserVoices();
-    }
-  } else {
-    populateVoices();
-  }
+  populateVoices();
 
   voiceSelect.addEventListener("change", () => {
     localStorage.setItem("readAloudVoice", voiceSelect.value);
@@ -365,239 +337,23 @@
     }
   });
 
-  // ========== Kokoro TTS ==========
-
-  function activateBrowserTTSFallback(message) {
-    useBrowserTTS = true;
-    voiceLoadingText.textContent = message;
-    populateBrowserVoices();
-    setTimeout(() => voiceLoading.classList.add("hidden"), 2500);
-  }
-
-  function doInitKokoro() {
-    voiceLoading.classList.remove("hidden");
-    voiceLoadingText.textContent = "Loading AI voice model (first time only)…";
-
-    const MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
-
-    // Race the model download against a timeout
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), KOKORO_TIMEOUT_MS)
-    );
-
-    const load = (async () => {
-      const { KokoroTTS } = await import(
-        "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm"
-      );
-      voiceLoadingText.textContent = "Downloading voice model…";
-
-      // Try WebGPU first (best quality), fall back to WASM (universal)
-      try {
-        return await KokoroTTS.from_pretrained(MODEL, {
-          dtype: "q8",
-          device: "webgpu",
-        });
-      } catch {
-        voiceLoadingText.textContent = "WebGPU not available, using WASM…";
-        return await KokoroTTS.from_pretrained(MODEL, {
-          dtype: "q8",
-          device: "wasm",
-        });
-      }
-    })();
-
-    return Promise.race([load, timeout]).then(
-      (tts) => {
-        kokoroTTS = tts;
-        voiceLoading.classList.add("hidden");
-        return true;
-      },
-      (err) => {
-        console.error("Kokoro TTS failed:", err);
-        const isTimeout = err.message === "timeout";
-        if (typeof speechSynthesis !== "undefined") {
-          activateBrowserTTSFallback(
-            isTimeout
-              ? "AI voice download timed out. Using built-in voice."
-              : "AI voice unavailable on this device. Using built-in voice."
-          );
-        } else {
-          voiceLoadingText.textContent =
-            "Could not load AI voice. Try a different browser.";
-        }
-        return false;
-      }
-    );
-  }
-
-  /** Returns a promise that resolves to true (Kokoro ready) or false. */
-  function initKokoro() {
-    if (kokoroTTS) return Promise.resolve(true);
-    if (useBrowserTTS) return Promise.resolve(false);
-
-    // On mobile, skip Kokoro entirely — WASM produces garbled audio on
-    // ARM processors. Use the phone's built-in voices instead.
-    if (IS_MOBILE) {
-      if (typeof speechSynthesis !== "undefined") {
-        activateBrowserTTSFallback("Using your phone's built-in voice.");
-      }
-      return Promise.resolve(false);
-    }
-
-    // If already loading, return the same promise so callers wait together
-    if (!kokoroLoadingPromise) {
-      kokoroLoadingPromise = doInitKokoro().finally(() => {
-        kokoroLoadingPromise = null;
-      });
-    }
-    return kokoroLoadingPromise;
-  }
-
-  // Browser SpeechSynthesis fallback voices
-  function populateBrowserVoices() {
-    const voices = speechSynthesis.getVoices();
-    if (voices.length === 0) {
-      speechSynthesis.addEventListener("voiceschanged", populateBrowserVoices, { once: true });
-      return;
-    }
-    voiceSelect.innerHTML = "";
-    const english = voices.filter((v) => v.lang.startsWith("en"));
-    const list = english.length > 0 ? english : voices.slice(0, 10);
-    list.forEach((v, i) => {
-      const opt = document.createElement("option");
-      opt.value = i.toString();
-      opt.textContent = v.name;
-      opt.dataset.voiceURI = v.voiceURI;
-      voiceSelect.appendChild(opt);
-    });
-  }
-
-  function splitTextForKokoro(text) {
-    const paragraphs = text.split(/\n{2,}/);
-    const chunks = [];
-    for (const p of paragraphs) {
-      const trimmed = p.trim();
-      if (!trimmed) continue;
-      if (trimmed.length <= 500) {
-        chunks.push(trimmed);
-      } else {
-        const sentences = trimmed.match(/[^.!?]+[.!?]+[\s]*/g) || [trimmed];
-        let buf = "";
-        for (const s of sentences) {
-          if (buf.length + s.length > 500) {
-            if (buf) chunks.push(buf.trim());
-            buf = s;
-          } else {
-            buf += s;
-          }
-        }
-        if (buf.trim()) chunks.push(buf.trim());
-      }
-    }
-    return chunks;
-  }
-
-  async function playSpeech() {
-    // IMPORTANT: Create/resume AudioContext immediately within the user
-    // gesture (tap/click). Mobile browsers block audio otherwise.
-    if (!kokoroAudioCtx) {
-      kokoroAudioCtx = new AudioContext({ sampleRate: 24000 });
-    }
-    if (kokoroAudioCtx.state === "suspended") {
-      await kokoroAudioCtx.resume();
-    }
-
-    await initKokoro();
-
-    if (useBrowserTTS) {
-      playWithBrowserTTS();
-      return;
-    }
-
-    if (!kokoroTTS) return;
-
-    const voiceId = voiceSelect.value || "af_heart";
-    const rate = parseFloat(speedSlider.value);
-    const chunks = splitTextForKokoro(currentText);
-
-    if (chunks.length === 0) return;
-
-    speaking = true;
-    paused = false;
-    speechStartTime = Date.now();
-    updatePlayerUI();
-    startTimer();
-
-    for (let i = 0; i < chunks.length; i++) {
-      if (!speaking) break;
-
-      try {
-        const result = await kokoroTTS.generate(chunks[i], {
-          voice: voiceId,
-        });
-
-        if (!speaking) break;
-
-        const audioData = result.audio;
-        const sampleRate = result.sampling_rate || 24000;
-        const buffer = kokoroAudioCtx.createBuffer(1, audioData.length, sampleRate);
-        buffer.getChannelData(0).set(audioData);
-
-        await new Promise((resolve) => {
-          const source = kokoroAudioCtx.createBufferSource();
-          source.buffer = buffer;
-          source.playbackRate.value = rate;
-          source.connect(kokoroAudioCtx.destination);
-          kokoroCurrentSource = source;
-
-          source.onended = () => {
-            kokoroCurrentSource = null;
-            resolve();
-          };
-          source.start();
-
-          const checkStop = setInterval(() => {
-            if (!speaking) {
-              clearInterval(checkStop);
-              try { source.stop(); } catch {}
-              resolve();
-            }
-          }, 100);
-        });
-
-      } catch (err) {
-        console.warn("Kokoro chunk error:", err);
-        continue;
-      }
-
-      const pct = ((i + 1) / chunks.length) * 100;
-      if (currentItemId) updateHistoryProgress(currentItemId, pct);
-    }
-
-    if (speaking) {
-      if (currentItemId) updateHistoryProgress(currentItemId, 100);
-    }
-    stopSpeech();
-  }
-
-  // ========== Browser SpeechSynthesis fallback ==========
-  function playWithBrowserTTS() {
+  // ========== Speech Playback ==========
+  function playSpeech() {
     if (typeof speechSynthesis === "undefined") return;
 
     speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(currentText);
     utterance.rate = parseFloat(speedSlider.value);
 
-    // Pick voice from select
+    // Pick selected voice
     const voices = speechSynthesis.getVoices();
-    const selectedOpt = voiceSelect.selectedOptions[0];
-    if (selectedOpt && selectedOpt.dataset.voiceURI) {
-      const voice = voices.find((v) => v.voiceURI === selectedOpt.dataset.voiceURI);
+    const selectedURI = voiceSelect.value;
+    if (selectedURI) {
+      const voice = voices.find((v) => v.voiceURI === selectedURI);
       if (voice) utterance.voice = voice;
     }
 
     speaking = true;
-    paused = false;
     speechStartTime = Date.now();
     updatePlayerUI();
     startTimer();
@@ -610,17 +366,11 @@
 
   // ========== Playback controls ==========
   function stopSpeech() {
-    if (kokoroCurrentSource) {
-      try { kokoroCurrentSource.stop(); } catch {}
-      kokoroCurrentSource = null;
-    }
-    // Also cancel browser TTS if active
     if (typeof speechSynthesis !== "undefined") {
       speechSynthesis.cancel();
     }
 
     speaking = false;
-    paused = false;
     clearInterval(speechTimer);
     speechStartTime = 0;
     progressBar.value = 0;
