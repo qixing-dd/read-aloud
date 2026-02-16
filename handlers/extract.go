@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -10,8 +11,9 @@ import (
 
 // extractResponse is the JSON shape returned by /api/extract.
 type extractResponse struct {
-	Title string `json:"title,omitempty"`
-	Text  string `json:"text"`
+	Title   string `json:"title,omitempty"`
+	Text    string `json:"text"`
+	Warning string `json:"warning,omitempty"`
 }
 
 // Extract handles POST /api/extract.
@@ -40,7 +42,8 @@ func Extract(w http.ResponseWriter, r *http.Request) {
 		defer file.Close()
 		text, err := extractor.ExtractFile(header.Filename, file)
 		if err != nil {
-			jsonError(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("file extraction error: %v", err)
+			jsonError(w, "Failed to extract text from the file.", http.StatusInternalServerError)
 			return
 		}
 		jsonOK(w, extractResponse{
@@ -55,7 +58,8 @@ func Extract(w http.ResponseWriter, r *http.Request) {
 	if rawURL != "" {
 		result, err := extractor.ExtractURL(rawURL)
 		if err != nil {
-			jsonError(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("URL extraction error: %v", err)
+			jsonError(w, "Failed to extract article from the URL.", http.StatusInternalServerError)
 			return
 		}
 		jsonOK(w, extractResponse{
@@ -65,9 +69,34 @@ func Extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- 3. Plain text ---
+	// --- 3. Plain text (with optional embedded URL) ---
 	text := strings.TrimSpace(r.FormValue("text"))
 	if text != "" {
+		urlCount := extractor.CountURLs(text)
+		if urlCount > 1 {
+			jsonError(w,
+				"We found more than one link in your text. "+
+					"Please paste one URL per submission so we can "+
+					"extract the right article for you.",
+				http.StatusBadRequest)
+			return
+		}
+		if urlCount == 1 {
+			result, err := extractor.ExtractFirstURL(text)
+			if err != nil {
+				jsonOK(w, extractResponse{
+					Text: text,
+					Warning: "Could not extract article from the link. " +
+						"Reading your original text instead.",
+				})
+				return
+			}
+			jsonOK(w, extractResponse{
+				Title: result.Title,
+				Text:  result.Text,
+			})
+			return
+		}
 		jsonOK(w, extractResponse{Text: text})
 		return
 	}

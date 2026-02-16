@@ -8,3 +8,12 @@ read-aloud.exe
 # OS files
 .DS_Store
 Thumbs.db
+
+# Test artifacts
+*.png
+*-test.mjs
+*-test*.mjs
+*-test*.json
+test-screenshots/
+verification-output.txt
+node_modules/

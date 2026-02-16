@@ -220,6 +220,15 @@
     return /^https?:\/\//i.test(str.trim());
   }
 
+  function containsURL(str) {
+    return /https?:\/\/[^\s"<>)]+/i.test(str);
+  }
+
+  function countURLs(str) {
+    const matches = str.match(/https?:\/\/[^\s"<>)]+/gi);
+    return matches ? matches.length : 0;
+  }
+
   let previewDebounce = null;
   inputBox.addEventListener("input", () => {
     clearTimeout(previewDebounce);
@@ -228,6 +237,10 @@
       previewDebounce = setTimeout(() => {
         try {
           const u = new URL(text);
+          if (u.protocol !== "http:" && u.protocol !== "https:") {
+            linkPreview.classList.add("hidden");
+            return;
+          }
           linkPreviewTitle.textContent = u.hostname;
           linkPreviewURL.textContent = text.length > 60 ? text.slice(0, 60) + "…" : text;
           linkPreview.classList.remove("hidden");
@@ -239,10 +252,16 @@
   });
 
   // ========== Status ==========
-  function showStatus(msg, type) {
-    statusEl.textContent = msg;
+  function showStatus(msg, type, dismissable) {
     statusEl.className = "status " + type;
     statusEl.classList.remove("hidden");
+    if (dismissable) {
+      statusEl.innerHTML = '<span class="status-msg">' + escapeHTML(msg) + '</span>' +
+        '<button class="status-dismiss" title="Dismiss">&times;</button>';
+      statusEl.querySelector(".status-dismiss").addEventListener("click", hideStatus);
+    } else {
+      statusEl.textContent = msg;
+    }
   }
   function hideStatus() { statusEl.classList.add("hidden"); }
 
@@ -263,15 +282,18 @@
       else form.append("text", text);
 
       const resp = await fetch("/api/extract", { method: "POST", body: form });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (!data.error) return data;
-      }
-    } catch {
-      // Backend unavailable — fall through to client-side
+      const data = await resp.json();
+
+      if (resp.ok && !data.error) return data;
+
+      // Backend returned an intentional error — surface it, don't fall through.
+      if (data.error) throw new Error(data.error);
+    } catch (e) {
+      // Re-throw backend errors; only fall through on network/fetch failures.
+      if (e instanceof Error && e.message && !e.message.includes("fetch")) throw e;
     }
 
-    // --- Attempt 2: Client-side extraction ---
+    // --- Attempt 2: Client-side extraction (backend unavailable) ---
     if (typeof ClientExtractor !== "undefined") {
       const opts = {};
       if (file) opts.file = file;
@@ -299,6 +321,13 @@
     } else if (looksLikeURL(text)) {
       showStatus("Extracting article…", "loading");
       type = "url";
+    } else if (containsURL(text)) {
+      if (countURLs(text) > 1) {
+        showStatus("We found more than one link. Please paste one URL per submission so we can extract the right article.", "error", true);
+        return;
+      }
+      showStatus("Extracting content from link…", "loading");
+      type = "text_with_url";
     } else {
       const id = addToHistory(text.slice(0, 50) + (text.length > 50 ? "…" : ""), "", text, "text");
       openPlayer(text.slice(0, 50), "", text, id);
@@ -309,15 +338,26 @@
       const data = await doExtract(file, text);
       hideStatus();
 
+      if (data.warning) {
+        showStatus(data.warning, "error", true);
+      }
+
       const title = data.title || (file ? file.name : text.slice(0, 50));
       let source = "";
+      let histType = type;
       if (type === "url") {
         try { source = new URL(text).hostname; } catch {}
       } else if (type === "file") {
         source = file.name;
+      } else if (type === "text_with_url") {
+        const urlMatch = text.match(/https?:\/\/[^\s"<>)]+/i);
+        if (urlMatch) {
+          try { source = new URL(urlMatch[0]).hostname; } catch {}
+        }
+        histType = data.warning ? "text" : "url";
       }
 
-      const id = addToHistory(title, source, data.text, type);
+      const id = addToHistory(title, source, data.text, histType);
       openPlayer(title, source, data.text, id);
 
       inputBox.value = "";
