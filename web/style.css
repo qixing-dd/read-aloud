@@ -48,6 +48,52 @@ body {
 
 /* ========== HOME VIEW ========== */
 
+/* Sound wave background animation */
+.sound-wave-bg {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 220px;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.sound-wave-bg svg {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 200%;
+  height: 100%;
+}
+.sound-wave-bg .wave {
+  stroke: none;
+}
+.sound-wave-bg .wave-1 {
+  fill: var(--accent);
+  opacity: 0.08;
+  animation: waveSlide 8s linear infinite;
+}
+.sound-wave-bg .wave-2 {
+  fill: var(--accent-light);
+  opacity: 0.12;
+  animation: waveSlide 11s linear infinite reverse;
+}
+.sound-wave-bg .wave-3 {
+  fill: var(--accent-dark);
+  opacity: 0.06;
+  animation: waveSlide 14s linear infinite;
+}
+@keyframes waveSlide {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+#view-home .container {
+  position: relative;
+  z-index: 1;
+}
+
 /* Greeting */
 .greeting { margin-bottom: var(--space-xl); }
 .greeting-label {
@@ -152,18 +198,23 @@ body {
 
 .history-card-delete {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background: none;
+  top: 6px;
+  right: 6px;
+  background: var(--bg);
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 1rem;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
   line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .history-card:hover .history-card-delete { opacity: 1; }
 .history-card-delete:hover { color: var(--error-text); background: var(--error-bg); }
@@ -222,6 +273,9 @@ body {
 
 /* Status */
 .status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-sm);
   margin-top: var(--space-sm);
@@ -229,6 +283,26 @@ body {
 }
 .status.loading { background: var(--info-bg); color: var(--info-text); }
 .status.error { background: var(--error-bg); color: var(--error-text); }
+
+.status-msg { flex: 1; }
+.status-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  opacity: 0.7;
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.status-dismiss:hover { opacity: 1; background: rgba(0, 0, 0, 0.08); }
 
 /* Input bottom row */
 .input-bottom {
@@ -484,7 +558,10 @@ button, .icon-btn, .btn-extract, .btn-play-large, .history-card {
 
 /* Show delete button on touch devices (no hover) */
 @media (hover: none) {
-  .history-card-delete { opacity: 0.6; }
+  .history-card-delete {
+    opacity: 0.8;
+    background: rgba(0, 0, 0, 0.06);
+  }
 }
 
 /* Safe area padding for phones with notches */
