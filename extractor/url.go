@@ -33,6 +33,10 @@ func ExtractURL(rawURL string) (*URLResult, error) {
 		return extractTweet(username, statusID)
 	}
 
+	if err := ValidateURL(rawURL); err != nil {
+		return nil, fmt.Errorf("URL rejected: %w", err)
+	}
+
 	article, err := readability.FromURL(rawURL, 30*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("extraction failed: %w", err)
@@ -143,6 +147,25 @@ func extractXArticle(article *fxArticle, authorName string) (*URLResult, error) 
 // linkPattern matches URLs in plain text.
 var linkPattern = regexp.MustCompile(`https?://[^\s"<>)]+`)
 
+// CountURLs returns the number of URLs found in the text.
+func CountURLs(text string) int {
+	return len(linkPattern.FindAllStringIndex(text, -1))
+}
+
+// ExtractFirstURL extracts readable content from the first URL found
+// in the text. The surrounding description text is discarded since it
+// typically describes the link. Only the extracted article content and
+// its title are returned.
+func ExtractFirstURL(text string) (*URLResult, error) {
+	loc := linkPattern.FindStringIndex(text)
+	if loc == nil {
+		return &URLResult{Text: text}, nil
+	}
+
+	rawURL := text[loc[0]:loc[1]]
+	return ExtractURL(rawURL)
+}
+
 // twitterHosts are hosts that belong to Twitter/X.
 var twitterHosts = map[string]bool{
 	"twitter.com": true, "www.twitter.com": true,
@@ -169,7 +192,22 @@ func findExternalLink(text string) string {
 // extractLinkedArticle follows a URL (including redirects) and
 // extracts the readable article content using go-readability.
 func extractLinkedArticle(rawURL string) (*URLResult, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	if err := ValidateURL(rawURL); err != nil {
+		return nil, fmt.Errorf("linked URL rejected: %w", err)
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if err := ValidateURL(req.URL.String()); err != nil {
+				return fmt.Errorf("redirect blocked: %w", err)
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 	resp, err := client.Get(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to follow link: %w", err)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"read-aloud/extractor"
@@ -18,6 +19,7 @@ func ExtractURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 	var req extractURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid JSON body", http.StatusBadRequest)
@@ -31,7 +33,8 @@ func ExtractURL(w http.ResponseWriter, r *http.Request) {
 
 	result, err := extractor.ExtractURL(req.URL)
 	if err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("URL extraction error: %v", err)
+		jsonError(w, "Failed to extract article from the URL.", http.StatusInternalServerError)
 		return
 	}
 

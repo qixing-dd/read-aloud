@@ -49,13 +49,19 @@ func ExtractDOCX(r io.Reader) (string, error) {
 		return "", fmt.Errorf("word/document.xml not found in docx")
 	}
 
+	// Guard against zip bombs: reject if uncompressed size exceeds 50 MB.
+	const maxDecompressed = 50 << 20
+	if docFile.UncompressedSize64 > maxDecompressed {
+		return "", fmt.Errorf("document.xml too large (%d bytes)", docFile.UncompressedSize64)
+	}
+
 	rc, err := docFile.Open()
 	if err != nil {
 		return "", fmt.Errorf("open document.xml: %w", err)
 	}
 	defer rc.Close()
 
-	return parseDocumentXML(rc)
+	return parseDocumentXML(io.LimitReader(rc, maxDecompressed))
 }
 
 // parseDocumentXML extracts plain text from Word's document.xml.
